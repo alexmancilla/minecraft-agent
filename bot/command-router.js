@@ -6,18 +6,20 @@ const { runAgent } = require('./agent')
 // tanto el chat como la voz lean/escriban el mismo modo.
 const estado = { modo: 'manual' }
 
-// Comandos fijos que se reconocen por voz/chat. El fuzzy-match compara la
-// transcripción contra esta lista, así "ben aquí" o "ven acá" siguen
-// activando "ven aqui" aunque el STT no transcriba perfecto.
-const COMANDOS_FIJOS = [
-  'ven aqui',
-  'sigueme',
-  'detente',
-  'salta',
-  'toma el control',
-  'ya lo tengo yo',
-  'craftea set de madera'
-]
+// Comandos fijos. Cada acción canónica tiene varias formas naturales de decirla;
+// el fuzzy-match compara la transcripción contra TODAS las variantes, así
+// "ven acá", "ben aquí" o "acércate" activan igual la acción "ven aqui".
+// (Evitamos alias de una sola palabra ambigua como "ven"/"para" para no
+// disparar por error con habla normal.)
+const COMANDOS = {
+  'ven aqui': ['ven aqui', 'ven aca', 'ven para aca', 'ven para aqui', 'acercate'],
+  'sigueme': ['sigueme', 'ven conmigo', 'acompaname'],
+  'detente': ['detente', 'detente ya', 'parate', 'quieto', 'alto ahi'],
+  'salta': ['salta', 'brinca'],
+  'toma el control': ['toma el control', 'modo automatico', 'controla tu'],
+  'ya lo tengo yo': ['ya lo tengo yo', 'modo manual', 'yo controlo'],
+  'craftea set de madera': ['craftea set de madera', 'crea set de madera', 'haz herramientas de madera']
+}
 
 // Variantes aceptadas de la palabra clave que activa el modo LLM (frase libre).
 const WAKE_WORDS = ['oye bot', 'oye, bot', 'hey bot', 'oye robot']
@@ -56,15 +58,19 @@ function matchComando(texto) {
   const t = normalizar(texto)
   if (!t) return null
 
-  let mejor = null
+  let mejorCanonico = null
+  let mejorVariante = null
   let mejorD = Infinity
-  for (const c of COMANDOS_FIJOS) {
-    const d = distancia(normalizar(c), t)
-    if (d < mejorD) { mejorD = d; mejor = c }
+  for (const [canonico, variantes] of Object.entries(COMANDOS)) {
+    for (const v of variantes) {
+      const d = distancia(normalizar(v), t)
+      if (d < mejorD) { mejorD = d; mejorCanonico = canonico; mejorVariante = v }
+    }
   }
 
-  const tolerancia = Math.max(2, Math.floor(normalizar(mejor).length * 0.25))
-  return mejorD <= tolerancia ? mejor : null
+  // Tolerancia proporcional a la longitud de la VARIANTE que más se acercó.
+  const tolerancia = Math.max(2, Math.floor(normalizar(mejorVariante).length * 0.25))
+  return mejorD <= tolerancia ? mejorCanonico : null
 }
 
 // Si el texto empieza con la palabra clave, devuelve el RESTO (la instrucción

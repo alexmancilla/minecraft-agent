@@ -1,0 +1,20 @@
+# Captura de micrófono (incluye PortAudio en el wheel de Windows)
+sounddevice
+numpy
+
+# Detección de voz (VAD). Usamos el wheel precompilado para no necesitar
+# compilador de C++ en Windows.
+webrtcvad-wheels
+
+# Whisper local en CPU (usa CTranslate2, NO requiere torch ni GPU)
+faster-whisper
+
+# Cliente WebSocket para mandar el texto al bot
+websocket-client
+
+# Backends cloud de STT (Groq y OpenAI usan el mismo SDK) + carga de .env
+openai
+python-dotenv
+
+# Hotkey global para push-to-talk (funciona aunque Minecraft tenga el foco)
+keyboard

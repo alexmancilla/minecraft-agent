@@ -1,11 +1,16 @@
 require('dotenv').config()
 
 const mineflayer = require('mineflayer')
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
+const { pathfinder, Movements } = require('mineflayer-pathfinder')
 const { plugin: collectBlock } = require('mineflayer-collectblock')
 const { plugin: toolPlugin } = require('mineflayer-tool')
-const { mineBlock, flattenArea, giveItem, craftWoodSet } = require('./actions')
-const { runAgent } = require('./agent')
+const { WebSocketServer } = require('ws')
+const { handleCommand } = require('./command-router')
+
+// Usuario de Minecraft "dueño" de la voz. Los comandos por voz se ejecutan en
+// nombre de este jugador (necesario para "ven aqui", "dame...", etc.).
+const OWNER = process.env.OWNER_USERNAME || ''
+const VOICE_PORT = parseInt(process.env.VOICE_WS_PORT || '8080', 10)
 
 process.on('uncaughtException', (err) => {
   console.log('🔥 Error no capturado (el bot sigue vivo):', err.message)
@@ -25,8 +30,6 @@ const bot = mineflayer.createBot({
 bot.loadPlugin(pathfinder)
 bot.loadPlugin(collectBlock)
 bot.loadPlugin(toolPlugin)
-
-let modo = 'manual'
 
 bot.on('spawn', () => {
   console.log('✅ El bot entró al mundo')
@@ -49,74 +52,29 @@ bot.on('kicked', (reason) => {
   console.log('⚠️ Me sacaron del servidor:', reason)
 })
 
+// --- Entrada por chat de Minecraft ---
 bot.on('chat', (username, message) => {
   if (username === bot.username) return
-
-  const player = bot.players[username]
-  const target = player?.entity
-
-  switch (message) {
-    case 'ven aqui': {
-      if (!target) { console.log(`⚠️ No veo a ${username}`); return }
-      const { x, y, z } = target.position
-      bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 1))
-      console.log(`🚶 Moviéndome hacia ${username}`)
-      return
-    }
-
-    case 'sigueme': {
-      if (!target) { console.log(`⚠️ No veo a ${username}`); return }
-      bot.pathfinder.setGoal(new goals.GoalFollow(target, 2), true)
-      console.log(`🚶 Siguiendo a ${username}`)
-      return
-    }
-
-    case 'detente': {
-      bot.pathfinder.setGoal(null)
-      console.log('🛑 Detenido')
-      return
-    }
-
-    case 'salta': {
-      bot.setControlState('jump', true)
-      setTimeout(() => bot.setControlState('jump', false), 250)
-      console.log('⬆️ Saltando')
-      return
-    }
-
-    case 'toma el control': {
-      modo = 'automatico'
-      bot.chat('Modo automático activado.')
-      console.log('🤖 Cambié a modo automático')
-      return
-    }
-
-    case 'ya lo tengo yo': {
-      modo = 'manual'
-      bot.pathfinder.setGoal(null)
-      bot.chat('Modo manual. Tú tienes el control.')
-      console.log('🎮 Cambié a modo manual')
-      return
-    }
-
-    case 'craftea set de madera': {
-      craftWoodSet(bot)
-      return
-    }
-  }
-
-  // Comando "dame X item" — usa patrón porque cantidad e ítem son variables, no texto fijo
-  const giveMatch = message.match(/^dame (\d+) (\S+)$/i)
-  if (giveMatch) {
-    const quantity = parseInt(giveMatch[1], 10)
-    const itemName = giveMatch[2]
-    giveItem(bot, itemName, quantity, username)
-    return
-  }
-
-  // Si llegamos aquí, el mensaje no coincidió con ningún comando fijo de arriba
-  if (modo === 'automatico') {
-    bot.chat(`Pensando en: "${message}"...`)
-    runAgent(bot, message, username)
-  }
+  handleCommand(bot, message, username)
 })
+
+// --- Entrada por voz (WebSocket) ---
+// El cliente de voz transcribe el micro y nos manda solo el TEXTO. Lo metemos
+// por el mismo router que el chat, en nombre del jugador OWNER.
+const wss = new WebSocketServer({ port: VOICE_PORT })
+
+wss.on('connection', (ws) => {
+  console.log('🎙️ Cliente de voz conectado')
+  ws.on('message', (data) => {
+    const texto = data.toString().trim()
+    if (!texto) return
+    console.log(`🗣️ Voz: "${texto}"`)
+    if (!OWNER) {
+      console.log('⚠️ OWNER_USERNAME no está configurado en .env — comandos como "ven aqui" no sabrán a quién buscar.')
+    }
+    handleCommand(bot, texto, OWNER)
+  })
+  ws.on('close', () => console.log('🎙️ Cliente de voz desconectado'))
+})
+
+console.log(`🎧 Servidor de voz escuchando en ws://localhost:${VOICE_PORT}`)
